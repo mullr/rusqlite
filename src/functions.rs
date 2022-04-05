@@ -254,6 +254,11 @@ impl Context<'_> {
     pub fn set_result_subtype(&self, sub_type: std::os::raw::c_uint) {
         unsafe { ffi::sqlite3_result_subtype(self.ctx, sub_type) };
     }
+
+    /// Set the result of an SQL function
+    pub fn set_result(&self, result: &crate::types::ToSqlOutput<'_>) {
+        unsafe { set_result(self.ctx, result) };
+    }
 }
 
 /// A reference to a connection handle with a lifetime bound to something.
@@ -346,6 +351,8 @@ bitflags::bitflags! {
         const SQLITE_SUBTYPE       = 0x0000_0010_0000; // 3.30.0
         /// Means that the function is unlikely to cause problems even if misused.
         const SQLITE_INNOCUOUS     = 0x0000_0020_0000; // 3.31.0
+        /// Tells rusqlite to ignore the return value of the provided function; instead, Context::set_result should be called manually.
+        const RUSQLITE_IGNORE_RETURN = 0x0000_4000_0000;
     }
 }
 
@@ -353,6 +360,13 @@ impl Default for FunctionFlags {
     #[inline]
     fn default() -> FunctionFlags {
         FunctionFlags::SQLITE_UTF8
+    }
+}
+
+impl FunctionFlags {
+    #[inline]
+    fn for_sqlite(&self) ->  FunctionFlags {
+        self.difference(FunctionFlags::RUSQLITE_IGNORE_RETURN)
     }
 }
 
@@ -521,16 +535,55 @@ impl InnerConnection {
             }
         }
 
+        unsafe extern "C" fn call_boxed_closure_no_ret<F, T>(
+            ctx: *mut sqlite3_context,
+            argc: c_int,
+            argv: *mut *mut sqlite3_value,
+        ) where
+            F: FnMut(&Context<'_>) -> Result<T>,
+            T: ToSql,
+        {
+            let r = catch_unwind(|| {
+                let boxed_f: *mut F = ffi::sqlite3_user_data(ctx).cast::<F>();
+                assert!(!boxed_f.is_null(), "Internal error - null function pointer");
+                let ctx = Context {
+                    ctx,
+                    args: slice::from_raw_parts(argv, argc as usize),
+                };
+                (*boxed_f)(&ctx)
+            });
+            let t = match r {
+                Err(_) => {
+                    report_error(ctx, &Error::UnwindingPanic);
+                    return;
+                }
+                Ok(r) => r,
+            };
+            let t = t.as_ref().map(|t| ToSql::to_sql(t));
+
+            match t {
+                Ok(Ok(_)) => (), //_ set_result(ctx, value),
+                Ok(Err(err)) => report_error(ctx, &err),
+                Err(err) => report_error(ctx, err),
+            }
+        }
+
         let boxed_f: *mut F = Box::into_raw(Box::new(x_func));
         let c_name = str_to_cstring(fn_name)?;
+        let f = if flags.contains(FunctionFlags::RUSQLITE_IGNORE_RETURN) {
+            call_boxed_closure_no_ret::<F, T>
+        } else {
+            call_boxed_closure::<F, T>
+        };
+
         let r = unsafe {
             ffi::sqlite3_create_function_v2(
                 self.db(),
                 c_name.as_ptr(),
                 n_arg,
-                flags.bits(),
+                flags.for_sqlite().bits(),
                 boxed_f.cast::<c_void>(),
-                Some(call_boxed_closure::<F, T>),
+                Some(f),
                 None,
                 None,
                 Some(free_boxed_value::<F>),
@@ -558,7 +611,7 @@ impl InnerConnection {
                 self.db(),
                 c_name.as_ptr(),
                 n_arg,
-                flags.bits(),
+                flags.for_sqlite().bits(),
                 boxed_aggr.cast::<c_void>(),
                 None,
                 Some(call_boxed_step::<A, D, T>),
@@ -589,7 +642,7 @@ impl InnerConnection {
                 self.db(),
                 c_name.as_ptr(),
                 n_arg,
-                flags.bits(),
+                flags.for_sqlite().bits(),
                 boxed_aggr.cast::<c_void>(),
                 Some(call_boxed_step::<A, W, T>),
                 Some(call_boxed_final::<A, W, T>),
