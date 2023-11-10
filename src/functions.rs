@@ -346,11 +346,13 @@ bitflags::bitflags! {
         /// Means that the function always gives the same output when the input parameters are the same.
         const SQLITE_DETERMINISTIC = ffi::SQLITE_DETERMINISTIC; // 3.8.3
         /// Means that the function may only be invoked from top-level SQL.
-        const SQLITE_DIRECTONLY    = 0x0000_0008_0000; // 3.30.0
+        const SQLITE_DIRECTONLY     = 0x0000_0008_0000; // 3.30.0
         /// Indicates to SQLite that a function may call `sqlite3_value_subtype()` to inspect the sub-types of its arguments.
-        const SQLITE_SUBTYPE       = 0x0000_0010_0000; // 3.30.0
+        const SQLITE_SUBTYPE        = 0x0000_0010_0000; // 3.30.0
         /// Means that the function is unlikely to cause problems even if misused.
-        const SQLITE_INNOCUOUS     = 0x0000_0020_0000; // 3.31.0
+        const SQLITE_INNOCUOUS      = 0x0000_0020_0000; // 3.31.0
+        /// Indicates to SQLite that a function might call `sqlite3_result_subtype()` to cause a sub-type to be associated with its result.
+        const SQLITE_RESULT_SUBTYPE = 0x0000_0100_0000; // 3.44.1 (pre)
         /// Tells rusqlite to ignore the return value of the provided function; instead, Context::set_result should be called manually.
         const RUSQLITE_IGNORE_RETURN = 0x0000_4000_0000;
     }
