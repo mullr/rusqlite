@@ -320,6 +320,14 @@ impl<'stmt> Row<'stmt> {
         Ok(val_ref)
     }
 
+    #[cfg(feature = "modern_sqlite")] // 3.9.0
+    /// Get the subtype of the value at the given index
+    pub fn get_subtype<I: RowIndex>(&self, idx: I) -> Result<u32> {
+        let idx = idx.idx(self.stmt)?;
+        Ok(self.stmt.value_subtype(idx))
+    }
+
+
     /// Get the value of a particular column of the result row as a `ValueRef`,
     /// allowing data to be read out of a row without copying.
     ///

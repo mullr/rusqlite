@@ -964,6 +964,16 @@ impl Statement<'_> {
         }
     }
 
+    #[cfg(feature = "modern_sqlite")] // 3.9.0
+    /// Get the subtpe of the value in the given column
+    pub(super) fn value_subtype(&self, col: usize) -> u32 {
+        unsafe {
+            let raw = self.stmt.ptr();
+            let value = ffi::sqlite3_column_value(raw, col as c_int);
+            ffi::sqlite3_value_subtype(value)
+        }
+    }
+
     #[inline]
     pub(super) fn step(&self) -> Result<bool> {
         match self.stmt.step() {
